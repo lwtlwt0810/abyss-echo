@@ -44,6 +44,18 @@ if (fs.existsSync(vars)) {
   console.log('[apply-android] minSdkVersion = 23');
 }
 
+// 3.1 版本号与 iOS 对齐：1.0.0 (versionCode 1)
+const gradle = path.join(AND, 'app', 'build.gradle');
+if (fs.existsSync(gradle)) {
+  let g = fs.readFileSync(gradle, 'utf8');
+  const before = g;
+  g = g.replace(/versionCode\s+\d+/, 'versionCode 1');
+  g = g.replace(/versionName\s+"[^"]*"/, 'versionName "1.0.0"');
+  if (g !== before) fs.writeFileSync(gradle, g);
+  const m = g.match(/versionCode\s+\d+[\s\S]{0,40}versionName\s+"[^"]*"/);
+  console.log('[apply-android] ' + (m ? m[0].replace(/\s+/g, ' ') : 'version patch applied'));
+}
+
 // 4. 校验关键文件确实存在
 const must = [
   'app/src/main/AndroidManifest.xml',
