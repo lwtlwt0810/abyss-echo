@@ -1,0 +1,25 @@
+# 依赖与构建产物
+node_modules/
+mobile/www/
+mobile/ios/App/www/
+mobile/android/
+mobile/ios/build/
+mobile/ios/out/
+mobile/ios/DerivedData/
+mobile/out/
+
+# 密钥 / 签名文件，绝不入库
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+*.apk
+*.aab
+*.ipa
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

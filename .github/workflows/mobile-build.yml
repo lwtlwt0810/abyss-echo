@@ -1,0 +1,219 @@
+name: Mobile Build (Android APK / iOS unsigned ipa)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_release:
+        description: '同时构建签名 release APK'
+        type: boolean
+        default: true
+      build_ios:
+        description: '同时构建未签名 iOS .ipa'
+        type: boolean
+        default: true
+  push:
+    branches: [ main ]
+    paths:
+      - 'index.html'
+      - 'mobile/**'
+      - '.github/workflows/mobile-build.yml'
+
+permissions:
+  contents: read
+
+env:
+  APP_ID: com.abyssecho.game
+  APP_VERSION: 1.0.0
+  MIN_SDK: '23'
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+
+      - name: Install npm dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Sync web assets
+        run: node tools/sync-web.js
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Apply native config overlay
+        run: node tools/apply-android.js
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Prepare release keystore
+        id: keystore
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
+        working-directory: mobile
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          PASS="${KS_PASS:-}"
+          if [ -z "$PASS" ]; then PASS="abyss-echo-ephemeral"; fi
+          echo "password=$PASS" >> "$GITHUB_OUTPUT"
+          if [ -n "${KS_B64:-}" ]; then
+            printf '%s' "$KS_B64" | base64 -d > release.keystore
+            echo "ephemeral=0" >> "$GITHUB_OUTPUT"
+            echo "使用仓库 Secret 中的固定 keystore"
+          else
+            keytool -genkeypair -v -keystore release.keystore -storetype PKCS12 \
+              -alias abyss -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$PASS" -keypass "$PASS" \
+              -dname "CN=Abyss Echo, O=AbyssEcho, C=CN"
+            echo "ephemeral=1" >> "$GITHUB_OUTPUT"
+            echo "::warning::未配置 ANDROID_KEYSTORE_BASE64，本次用一次性 keystore 签名，release 包之间无法覆盖升级"
+          fi
+
+      - name: Build release APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
+        working-directory: mobile
+        env:
+          KS_PASS: ${{ steps.keystore.outputs.password }}
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon --stacktrace \
+            -Pandroid.injected.signing.store.file="$PWD/../release.keystore" \
+            -Pandroid.injected.signing.store.password="$KS_PASS" \
+            -Pandroid.injected.signing.key.alias=abyss \
+            -Pandroid.injected.signing.key.password="$KS_PASS"
+
+      - name: Cleanup keystore
+        if: always()
+        working-directory: mobile
+        run: rm -f release.keystore
+
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/*.apk out/ 2>/dev/null || true
+          cp android/app/build/outputs/apk/release/*.apk out/ 2>/dev/null || true
+          ls -la out
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: abyss-echo-debug-apk
+          path: mobile/out/*debug*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload release APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: abyss-echo-release-apk
+          path: mobile/out/*release*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Verify APK metadata
+        run: |
+          APK=$(ls out/*.apk | head -n1)
+          echo "APK: $APK"
+          $ANDROID_HOME/build-tools/34.0.0/aapt2 dump badging "$APK" | head -n 12 || true
+
+      - name: Summary
+        run: |
+          {
+            echo "## Android 构建完成"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 包名 | \`$APP_ID\` |"
+            echo "| 版本 | \`$APP_VERSION\` (versionCode 1) |"
+            echo "| 最低 Android | API $MIN_SDK (Android 6.0) |"
+            echo "| 目标 Android | API 34 |"
+            echo "| run | $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID |"
+            echo ""
+            echo "产物在本次运行的 Artifacts 区域：\`abyss-echo-debug-apk\`、\`abyss-echo-release-apk\`。"
+            echo "安装：手机开启「允许安装未知来源应用」，把 apk 拷进手机点击安装。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ios:
+    name: iOS unsigned ipa
+    runs-on: macos-14
+    timeout-minutes: 30
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_ios }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sync web assets
+        run: |
+          cd mobile
+          node tools/sync-web.js
+
+      - name: Build for device (no code signing)
+        run: |
+          cd mobile/ios
+          xcodebuild -project AbyssEcho.xcodeproj \
+            -scheme AbyssEcho \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned ipa
+        run: |
+          cd mobile/ios
+          mkdir -p out/Payload
+          cp -R build/Build/Products/Release-iphoneos/AbyssEcho.app out/Payload/
+          cd out
+          zip -qry AbyssEcho-unsigned.ipa Payload
+          ls -la
+
+      - name: Upload unsigned ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: abyss-echo-ios-unsigned-ipa
+          path: mobile/ios/out/AbyssEcho-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          {
+            echo "## iOS 未签名 ipa"
+            echo ""
+            echo "该包**未签名**，不能直接装到 iPhone。用途："
+            echo "1. 证明 Xcode 工程可编译（本步骤即编译验证）；"
+            echo "2. 在 Windows 上用 Sideloadly / AltStore 以你的 Apple ID 重签后安装（免费账号 7 天有效期）；"
+            echo "3. 在 Mac 上用 Xcode 打开工程并选择你的 Team 直接运行。"
+          } >> "$GITHUB_STEP_SUMMARY"

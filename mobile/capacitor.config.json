@@ -1,0 +1,23 @@
+{
+  "appId": "com.abyssecho.game",
+  "appName": "深渊回响",
+  "webDir": "www",
+  "loggingBehavior": "none",
+  "android": {
+    "backgroundColor": "#05060a",
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "ios": {
+    "backgroundColor": "#05060a",
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "limitsNavigationsToAppBoundDomains": false
+  },
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "capacitor",
+    "hostname": "localhost"
+  }
+}
