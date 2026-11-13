@@ -67,6 +67,39 @@
   const pad2 = (n) => String(n).padStart(2, '0');
   const fmtTime = (s) => `${pad2(Math.floor(s / 60))}:${pad2(Math.floor(s % 60))}`;
 
+  // 中文像素化：先以 1/k 尺寸绘制再最近邻放大，得到点阵质感（带黑色描边）
+  const pixCache = new Map();
+  function pixText(str, x, y, size, color, align, k) {
+    const step = k || 3;
+    const s = Math.max(5, Math.round(size / step));
+    const key = str + '|' + s + '|' + color + '|' + step;
+    let cv = pixCache.get(key);
+    if (!cv) {
+      const m = document.createElement('canvas');
+      const mm = m.getContext('2d');
+      mm.font = `900 ${s}px ${FONT}`;
+      const w = Math.ceil(mm.measureText(str).width) + 3;
+      m.width = Math.max(4, w);
+      m.height = s + 5;
+      const g = m.getContext('2d');
+      g.font = `900 ${s}px ${FONT}`;
+      g.textBaseline = 'top';
+      g.fillStyle = '#05070b';
+      g.fillText(str, 2, 2); g.fillText(str, 1, 2); g.fillText(str, 2, 1);
+      g.fillStyle = color;
+      g.fillText(str, 1, 1);
+      cv = m;
+      pixCache.set(key, cv);
+    }
+    const w = cv.width * step, h = cv.height * step;
+    const dx = align === 'center' ? Math.round(x - w / 2) : align === 'right' ? Math.round(x - w) : Math.round(x);
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(cv, 0, 0, cv.width, cv.height, dx, Math.round(y - cv.height * step * 0.82), w, h);
+    ctx.imageSmoothingEnabled = prev;
+    return w;
+  }
+
   function mulberry32(seed) {
     let a = seed >>> 0;
     return function () {
@@ -3603,15 +3636,18 @@
     const c = ctx;
     for (const o of room.obstacles) {
       c.fillStyle = 'rgba(0,0,0,.35)';
-      c.fillRect(o.x + 3, o.y + 5, o.w, o.h);
+      c.fillRect(o.x + 5, o.y + 7, o.w, o.h);
+      c.fillStyle = '#05070b';
+      c.fillRect(o.x - 2, o.y - 2, o.w + 4, o.h + 4);
       c.fillStyle = cfg.wall;
       c.fillRect(o.x, o.y, o.w, o.h);
-      c.fillStyle = cfg.wallHi;
-      c.globalAlpha = 0.5;
-      c.fillRect(o.x, o.y, o.w, 3);
-      c.globalAlpha = 1;
-      c.strokeStyle = 'rgba(0,0,0,.4)';
-      c.strokeRect(o.x + 0.5, o.y + 0.5, o.w, o.h);
+      c.fillStyle = hexShade(cfg.wallHi, -0.08);
+      c.fillRect(o.x, o.y, o.w, Math.max(3, o.h * 0.16));
+      c.fillStyle = hexShade(cfg.wall, -0.45);
+      c.fillRect(o.x, o.y + o.h - Math.max(3, o.h * 0.18), o.w, Math.max(3, o.h * 0.18));
+      c.fillStyle = 'rgba(0,0,0,.22)';
+      for (let y = o.y + 14; y < o.y + o.h - 6; y += 14) c.fillRect(o.x, y, o.w, 2);
+      for (let x = o.x + 18; x < o.x + o.w - 6; x += 20) c.fillRect(x, o.y, 2, o.h);
     }
   }
 
@@ -4680,6 +4716,116 @@
     c.fillRect(X + Math.round(R * 0.2), Y - 2, 3, 3);
   }
 
+  function drawPxDecor(c, room, cfg, K, ox, oy) {
+    if (!room.decorSeed) room.decorSeed = 1 + ((Math.random() * 99999) | 0);
+    let seed = room.decorSeed;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const cols = 6, rows = 4;
+    for (let gy = 0; gy < rows; gy++) {
+      for (let gx = 0; gx < cols; gx++) {
+        const p = rnd();
+        if (p > 0.55) continue;
+        const wx = 120 + (gx + 0.2 + rnd() * 0.6) * ((ROOM_W - 240) / cols);
+        const wy = 120 + (gy + 0.2 + rnd() * 0.6) * ((ROOM_H - 240) / rows);
+        const X = Math.round(wx * K + ox), Y = Math.round(wy * K + oy);
+        if (p < 0.16) {
+          // 血迹
+          c.fillStyle = 'rgba(122,20,28,.55)';
+          c.fillRect(X - 5, Y - 2, 10, 4);
+          c.fillRect(X - 3, Y + 2, 6, 3);
+          c.fillStyle = 'rgba(122,20,28,.35)';
+          c.fillRect(X + 6, Y + 1, 3, 2);
+        } else if (p < 0.32) {
+          // 碎石
+          c.fillStyle = hexShade(cfg.tile, -0.3);
+          c.fillRect(X - 4, Y, 4, 3);
+          c.fillRect(X + 1, Y + 2, 3, 2);
+          c.fillStyle = hexShade(cfg.tile, 0.18);
+          c.fillRect(X - 3, Y, 2, 1);
+        } else if (p < 0.44) {
+          // 骨头
+          c.fillStyle = '#cfd4dc';
+          c.fillRect(X - 6, Y, 8, 2);
+          c.fillRect(X - 7, Y - 1, 2, 4);
+          c.fillRect(X + 2, Y - 1, 2, 4);
+          c.fillStyle = 'rgba(0,0,0,.35)';
+          c.fillRect(X - 6, Y + 2, 8, 1);
+        } else if (p < 0.52) {
+          // 裂纹
+          c.fillStyle = hexShade(cfg.tile, -0.26);
+          c.fillRect(X - 7, Y - 4, 2, 2);
+          c.fillRect(X - 5, Y - 2, 2, 2);
+          c.fillRect(X - 3, Y, 2, 2);
+          c.fillRect(X - 1, Y + 2, 2, 2);
+          c.fillRect(X + 1, Y + 4, 2, 2);
+        }
+      }
+    }
+    // 房间中央地毯（Boss/精英房）
+    if (room.type === 'boss' || room.type === 'elite') {
+      const cx = Math.round(640 * K + ox), cy = Math.round(360 * K + oy);
+      const w = Math.round(260 * K), h = Math.round(200 * K);
+      c.fillStyle = 'rgba(0,0,0,.28)';
+      c.fillRect(cx - w / 2, cy - h / 2, w, h);
+      c.fillStyle = room.type === 'boss' ? 'rgba(120,20,30,.55)' : 'rgba(90,60,20,.45)';
+      c.fillRect(cx - w / 2 + 3, cy - h / 2 + 3, w - 6, h - 6);
+      c.fillStyle = cfg.accent;
+      c.globalAlpha = 0.35;
+      for (let i = 0; i < 4; i++) {
+        c.fillRect(cx - w / 2 + 6 + i * 4, cy - h / 2 + 6, 2, h - 12);
+        c.fillRect(cx + w / 2 - 8 - i * 4, cy - h / 2 + 6, 2, h - 12);
+      }
+      c.globalAlpha = 1;
+    }
+  }
+
+  function torchList(room) {
+    const t = 34;
+    return [
+      { x: 440, y: t, ph: 0 }, { x: 840, y: t, ph: 1.7 },
+      { x: 440, y: ROOM_H - t, ph: 3.1 }, { x: 840, y: ROOM_H - t, ph: 4.4 },
+      { x: t, y: 250, ph: 2.2 }, { x: ROOM_W - t, y: 250, ph: 5.0 }
+    ];
+  }
+
+  function drawPxTorches(c, room, cfg, K, ox, oy) {
+    for (const t of torchList(room)) {
+      const X = Math.round(t.x * K + ox), Y = Math.round(t.y * K + oy);
+      const fl = Math.sin(G.time * 9 + t.ph) * 0.5 + 0.5;
+      c.fillStyle = '#2b2118';
+      c.fillRect(X - 2, Y - 2, 4, 6);
+      c.fillStyle = '#4a3a28';
+      c.fillRect(X - 3, Y - 3, 6, 2);
+      c.fillStyle = '#ff922b';
+      c.fillRect(X - 2, Y - 7 - fl * 2, 4, 5);
+      c.fillStyle = '#ffd43b';
+      c.fillRect(X - 1, Y - 8 - fl * 2, 2, 4);
+      c.fillStyle = 'rgba(255,146,43,.35)';
+      c.fillRect(X - 3, Y - 9 - fl * 2, 6, 2);
+    }
+  }
+
+  function drawPxLights(room, cfg) {
+    const sx = canvas.width / view.viewW;
+    const cx = canvas.width / 2, cy = canvas.height / 2;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'lighter';
+    for (const t of torchList(room)) {
+      const X = (t.x - G.cam.x) * sx + cx;
+      const Y = (t.y - G.cam.y) * sx + cy;
+      const R = 210 * sx * (0.93 + 0.07 * Math.sin(G.time * 7 + t.ph));
+      if (X < -R || Y < -R || X > canvas.width + R || Y > canvas.height + R) continue;
+      const g = ctx.createRadialGradient(X, Y, 2, X, Y, R);
+      g.addColorStop(0, 'rgba(255,176,86,.20)');
+      g.addColorStop(0.4, 'rgba(255,132,54,.08)');
+      g.addColorStop(1, 'rgba(255,110,40,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(X, Y, R, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function renderWorld() {
     const run = G.run;
     if (!run || !run.room) return;
@@ -4705,7 +4851,9 @@
     pc.fillStyle = cfg.bg2;
     pc.fillRect(0, 0, w, h);
     drawPxFloor(pc, room, cfg, K, ox, oy);
+    drawPxDecor(pc, room, cfg, K, ox, oy);
     drawPxWalls(pc, room, cfg, K, ox, oy);
+    drawPxTorches(pc, room, cfg, K, ox, oy);
 
     // 道具/机关/特效沿用世界坐标绘制（低分辨率下自然像素化）
     const savedCtx = ctx;
@@ -4735,6 +4883,7 @@
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(PX.cv, 0, 0, w, h, 0, 0, canvas.width, canvas.height);
     ctx.imageSmoothingEnabled = true;
+    drawPxLights(room, cfg);
     ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
     // 暗角
     const vg = ctx.createRadialGradient(view.w / 2, view.h / 2, Math.min(view.w, view.h) * 0.38, view.w / 2, view.h / 2, Math.max(view.w, view.h) * 0.78);
@@ -5261,10 +5410,8 @@
     c.fillStyle = color; c.fillRect(x + 8, y + 8, w - 16, 4);
     c.fillRect(x + 8, y + h - 12, w - 16, 4);
     c.textAlign = 'center';
-    c.fillStyle = '#000'; c.font = font(32, 900);
-    c.fillText(title, x + w / 2 + 2, y + 72 + 2);
-    c.fillStyle = color;
-    c.fillText(title, x + w / 2, y + 72);
+    pixText(title, x + w / 2 + 2, y + 80, 34, '#000000', 'center', 3);
+    pixText(title, x + w / 2, y + 78, 34, color, 'center', 3);
     c.fillStyle = 'rgba(255,255,255,.4)'; c.font = font(12, 600);
     c.fillText(sub, x + w / 2, y + 98);
     c.textAlign = 'left';
@@ -5376,15 +5523,10 @@
     }
     // Logo
     c.textAlign = 'left';
-    c.fillStyle = '#000000';
-    c.font = font(74, 900);
-    c.fillText('深渊回响', 82, 164);
-    c.fillStyle = '#8c1c22';
-    c.fillText('深渊回响', 78, 160);
-    c.fillStyle = '#c92a2a';
-    c.fillText('深渊回响', 76, 158);
-    c.fillStyle = '#f8f9fa';
-    c.fillText('深渊回响', 72, 154);
+    pixText('深渊回响', 82, 168, 78, '#000000', 'left', 4);
+    pixText('深渊回响', 78, 164, 78, '#8c1c22', 'left', 4);
+    pixText('深渊回响', 76, 162, 78, '#c92a2a', 'left', 4);
+    pixText('深渊回响', 72, 158, 78, '#f8f9fa', 'left', 4);
     // 副标题
     c.fillStyle = 'rgba(116,192,252,.9)';
     c.font = font(16, 800);
@@ -5452,10 +5594,7 @@
     c.fillStyle = '#080b12'; c.fillRect(0, 0, 1280, 720);
     c.fillStyle = 'rgba(255,255,255,.02)';
     for (let y = 0; y < 720; y += 16) for (let x = ((y / 16) % 2) * 8; x < 1280; x += 16) c.fillRect(x, y, 2, 2);
-    c.fillStyle = '#000'; c.font = font(24, 900);
-    c.fillText('图 鉴', 23, 49);
-    c.fillStyle = '#e9ecef';
-    c.fillText('图 鉴', 21, 47);
+    pixText('图 鉴', 21, 52, 26, '#e9ecef', 'left', 3);
     if (G.codexTab == null) G.codexTab = 0;
     const tabIdx = G.codexTab;
     const tabs = ['武 器', '敌 人', '遗 物'];
@@ -5523,10 +5662,7 @@
     c.fillStyle = '#080b12'; c.fillRect(0, 0, 1280, 720);
     c.fillStyle = 'rgba(255,255,255,.02)';
     for (let y = 0; y < 720; y += 16) for (let x = ((y / 16) % 2) * 8; x < 1280; x += 16) c.fillRect(x, y, 2, 2);
-    c.fillStyle = '#000'; c.font = font(24, 900);
-    c.fillText('选 择 角 色', 23, 49);
-    c.fillStyle = '#e9ecef';
-    c.fillText('选 择 角 色', 21, 47);
+    pixText('选 择 角 色', 21, 52, 26, '#e9ecef', 'left', 3);
     c.fillStyle = 'rgba(255,255,255,.4)'; c.font = font(12, 600);
     c.fillText('全部角色默认解锁 · 点击卡片立即出发', 21, 70);
     btn('back', 1160, 24, 90, 38, '返回', { size: 15 });
