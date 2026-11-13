@@ -957,10 +957,22 @@
       });
     }
   }
-  function addText(x, y, str, color, size) {
+  function addText(x, y, str, color, size, opts) {
     const run = G.run; if (!run) return;
-    if (run.texts.length > 40) run.texts.shift();
-    run.texts.push({ x: x + rand(-6, 6), y, text: str, color, size: size || 14, life: 0.62, t: 0.62, vy: -52 });
+    opts = opts || {};
+    if (run.texts.length > 50) run.texts.shift();
+    run.texts.push({
+      x: x + rand(-4, 4),
+      y: y + rand(-2, 2),
+      text: str,
+      color,
+      size: size || 14,
+      life: opts.life || (size >= 17 ? 0.78 : 0.58),
+      t: opts.life || (size >= 17 ? 0.78 : 0.58),
+      vy: opts.vy || -(size >= 17 ? 68 : 52),
+      crit: !!opts.crit,
+      dmgType: opts.dmgType || 'hit'
+    });
   }
   function toast(msg) {
     G.toast = { text: msg, t: 1.8 };
@@ -1181,6 +1193,9 @@
       run.boss = makeBoss(cfg.boss, room);
       Sound.play('bossin');
       G.banner = { title: BOSSES[cfg.boss].name, sub: BOSSES[cfg.boss].title, t: 2.2 };
+      run.bossIntroT = 0.9;
+      run.bossIntroFrom = { x: 640, y: 320 };
+      shake(0.14);
     } else if (room.type === 'treasure') {
       if (!room.looted) { run.chest = { x: 640, y: 330, open: false }; }
       room.cleared = true;
@@ -2151,7 +2166,7 @@
     d = Math.max(1, Math.round(d));
     e.hp -= d; e.hitFlash = 0.08;
     run.stats.hits++; run.stats.dmg += d;
-    addText(e.x, e.y - e.r - 6, String(d), crit ? '#ffd43b' : '#f1f3f5', crit ? 19 : 13);
+    addText(e.x, e.y - e.r - 6, String(d), crit ? '#ffd43b' : '#f1f3f5', crit ? 20 : 14, { crit });
     const canHs = !e.hitstopCd || e.hitstopCd <= 0;
     if (crit) Sound.play('crit'); else Sound.play('hit');
     if (canHs) hitstop(crit ? 0.045 : 0.03);
@@ -3549,6 +3564,7 @@
     }
     if (G.toast) { G.toast.t -= dt; if (G.toast.t <= 0) G.toast = null; }
     if (G.banner) { G.banner.t -= dt; if (G.banner.t <= 0) G.banner = null; }
+    if (run.bossIntroT > 0) { run.bossIntroT -= dt; if (run.bossIntroT <= 0) run.bossIntroT = 0; }
     G.fade = Math.max(0, G.fade - dt * 2.2);
 
     updatePlayer(dt);
@@ -4412,16 +4428,51 @@
     const c = ctx;
     c.textAlign = 'center';
     for (const t of run.texts) {
-      const a = clamp(t.t / 0.62, 0, 1);
+      const a = clamp(t.t / t.life, 0, 1);
       c.globalAlpha = a;
-      c.font = font(t.size, 800);
-      c.lineWidth = 3;
-      c.strokeStyle = 'rgba(0,0,0,.65)';
-      c.strokeText(t.text, t.x, t.y);
-      c.fillStyle = t.color;
-      c.fillText(t.text, t.x, t.y);
+      // 暴击字有轻微左右抖动（前半段）
+      let ox = 0;
+      if (t.crit && a > 0.4) ox = Math.sin((1 - a) * 40) * 1.5;
+      const size = t.size;
+      c.font = `900 ${size}px ${FONT}`;
+      const tx = t.x + ox, ty = t.y;
+      if (t.crit) {
+        // 暴击：金色双层描边 + 外发光 + 白芯
+        c.lineJoin = 'round';
+        c.lineWidth = size * 0.55;
+        c.strokeStyle = 'rgba(255,212,59,.35)';
+        c.strokeText(t.text, tx, ty);
+        c.lineWidth = size * 0.35;
+        c.strokeStyle = '#6b4d0a';
+        c.strokeText(t.text, tx, ty);
+        c.lineWidth = size * 0.18;
+        c.strokeStyle = '#0b0f14';
+        c.strokeText(t.text, tx, ty);
+        c.lineWidth = 0;
+        c.fillStyle = t.color;
+        c.fillText(t.text, tx, ty);
+        c.fillStyle = '#fff8dc';
+        c.fillText(t.text, tx - 1, ty - 1);
+      } else {
+        // 普通：黑描边 + 投影
+        c.lineJoin = 'round';
+        c.lineWidth = size * 0.38;
+        c.strokeStyle = 'rgba(0,0,0,.55)';
+        c.strokeText(t.text, tx + 1, ty + 1);
+        c.lineWidth = size * 0.24;
+        c.strokeStyle = '#0b0f14';
+        c.strokeText(t.text, tx, ty);
+        c.lineWidth = 0;
+        c.fillStyle = t.color;
+        c.fillText(t.text, tx, ty);
+        c.fillStyle = '#ffffff';
+        c.globalAlpha = a * 0.85;
+        c.fillText(t.text, tx - 1, ty - 1);
+      }
     }
     c.globalAlpha = 1;
+    c.lineWidth = 1;
+    c.lineJoin = 'miter';
     c.textAlign = 'left';
   }
 
@@ -4514,6 +4565,50 @@
     c.beginPath(); c.arc(cx, cy, rr2 * 0.62, 0, TAU); c.stroke();
     c.fillStyle = hexA(cfg.accent, 0.07);
     c.beginPath(); c.arc(cx, cy, rr2 * 0.22, 0, TAU); c.fill();
+  }
+
+  function drawPxAtmosphere(c, room, cfg, K, ox, oy) {
+    // 每个房间一次生成、缓存氛围粒子
+    if (!room._atmos) {
+      const seed = (room.cx * 73856093) ^ (room.cy * 19349663) ^ (room.id || 0);
+      const rng = mulberry32(seed >>> 0);
+      const spots = [];
+      const n = 32;
+      for (let i = 0; i < n; i++) {
+        spots.push({
+          x: WALL + rng() * (ROOM_W - WALL * 2),
+          y: WALL + rng() * (ROOM_H - WALL * 2),
+          kind: rng() < 0.6 ? 'ember' : 'dust',
+          hue: rng(),
+          speed: 0.3 + rng() * 0.8,
+          phase: rng() * TAU,
+          amp: 1 + rng() * 2
+        });
+      }
+      room._atmos = spots;
+    }
+    const t = G.time;
+    for (const p of room._atmos) {
+      const px = Math.round((p.x + Math.sin(t * p.speed + p.phase) * p.amp) * K + ox);
+      const py = Math.round((p.y + Math.cos(t * p.speed * 0.7 + p.phase) * p.amp * 0.6) * K + oy);
+      if (p.kind === 'ember') {
+        // 萤光小光点：按 cfg.accent 配色，闪烁
+        const flick = 0.35 + 0.35 * Math.sin(t * 4 + p.phase);
+        c.fillStyle = hexA(cfg.accent, flick * 0.15);
+        c.fillRect(px - 2, py - 2, 4, 4);
+        c.fillStyle = hexA(cfg.accent, flick * 0.30);
+        c.fillRect(px - 1, py - 1, 2, 2);
+        if (flick > 0.55) {
+          c.fillStyle = '#ffffff';
+          c.fillRect(px, py, 1, 1);
+        }
+      } else {
+        // 尘埃：暗色小点，极低透明度
+        const a = 0.08 + 0.06 * Math.sin(t * 1.5 + p.phase);
+        c.fillStyle = hexA('#d4c9b0', a);
+        c.fillRect(px, py, 1, 1);
+      }
+    }
   }
 
   function drawPxWalls(c, room, cfg, K, ox, oy) {
@@ -4610,7 +4705,7 @@
     c.fillRect(X - R, Y + R - 1, R * 2, Math.max(1, Math.round(R * 0.4)));
     const shape = e.def.shape || 'blob';
     const ai = e.def.ai || '';
-    const P = G.run.player;
+    const P = (G.run && G.run.player) || { x: e.x, y: e.y - 40 };
     let ax = P.x - e.x, ay = P.y - e.y;
     const al = Math.hypot(ax, ay) || 1; ax /= al; ay /= al;
     const putE = (t, s, col, sz) => {
@@ -5006,28 +5101,42 @@
   }
 
   function drawPxBullets(c, run, K, ox, oy) {
-    for (const b of run.bullets) {
+    const drawOne = (b, hostile) => {
       const X = Math.round(b.x * K + ox), Y = Math.round(b.y * K + oy);
       const sz = b.r > 6 ? 3 : 2;
-      const col = b.color || '#ffe066';
-      c.fillStyle = hexShade(col, -0.5);
+      const col = b.color || (hostile ? '#ff6b6b' : '#ffe066');
+      // 速度方向（反方向取拖尾）
+      const vx = (b.vx || 0) * K, vy = (b.vy || 0) * K;
+      const vl = Math.hypot(vx, vy);
+      const tx = vl > 0 ? -vx / vl : 0, ty = vl > 0 ? -vy / vl : 0;
+      // 拖尾：沿反方向 4 段渐淡
+      for (let i = 1; i <= 4; i++) {
+        const d = i * (sz + 1);
+        const px = X + Math.round(tx * d), py = Y + Math.round(ty * d);
+        const tailSz = Math.max(1, sz - Math.floor(i / 2));
+        c.fillStyle = hexA(col, 0.28 - i * 0.05);
+        c.fillRect(px - tailSz, py - tailSz, tailSz * 2, tailSz * 2);
+      }
+      // glow 层：比子弹本体大一圈的半透明
+      c.fillStyle = hexA(col, hostile ? 0.22 : 0.18);
+      c.fillRect(X - sz - 3, Y - sz - 3, (sz + 3) * 2, (sz + 3) * 2);
+      c.fillStyle = hexA(col, 0.38);
+      c.fillRect(X - sz - 2, Y - sz - 2, (sz + 2) * 2, (sz + 2) * 2);
+      // 黑描边 + 本体
+      c.fillStyle = '#0b0f14';
       c.fillRect(X - sz - 1, Y - sz - 1, sz * 2 + 2, sz * 2 + 2);
       c.fillStyle = col;
       c.fillRect(X - sz, Y - sz, sz * 2, sz * 2);
+      // 白色内核 + 朝向前方的高光
       c.fillStyle = '#ffffff';
-      c.fillRect(X - 1, Y - 1, 1, 1);
-    }
-    for (const b of run.ebullets) {
-      const X = Math.round(b.x * K + ox), Y = Math.round(b.y * K + oy);
-      const sz = b.r > 7 ? 3 : 2;
-      const col = b.color || '#ff6b6b';
-      c.fillStyle = '#2b0508';
-      c.fillRect(X - sz - 1, Y - sz - 1, sz * 2 + 2, sz * 2 + 2);
-      c.fillStyle = col;
-      c.fillRect(X - sz, Y - sz, sz * 2, sz * 2);
-      c.fillStyle = '#fff3bf';
-      c.fillRect(X - 1, Y - 1, 1, 1);
-    }
+      c.fillRect(X - 1, Y - 1, 2, 2);
+      if (vl > 0) {
+        const hx = X + Math.round(tx * -sz), hy = Y + Math.round(ty * -sz);
+        c.fillRect(hx - 1, hy - 1, 1, 1);
+      }
+    };
+    for (const b of run.bullets) drawOne(b, false);
+    for (const b of run.ebullets) drawOne(b, true);
   }
 
   function drawPxBoss(c, b, K, ox, oy) {
@@ -5239,6 +5348,7 @@
     pc.fillStyle = cfg.bg2;
     pc.fillRect(0, 0, w, h);
     drawPxFloor(pc, room, cfg, K, ox, oy);
+    drawPxAtmosphere(pc, room, cfg, K, ox, oy);
     drawPxDecor(pc, room, cfg, K, ox, oy);
     drawPxWalls(pc, room, cfg, K, ox, oy);
     drawPxTorches(pc, room, cfg, K, ox, oy);
@@ -5280,6 +5390,66 @@
     vg.addColorStop(1, 'rgba(0,0,0,.42)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, view.w, view.h);
+    // Boss 登场动画：黑屏 → 白色光环爆开 → 淡出
+    if (run.bossIntroT > 0) {
+      const T = 0.9;
+      const p = 1 - run.bossIntroT / T; // 0 → 1
+      const cx = run.bossIntroFrom ? run.bossIntroFrom.x : ROOM_W / 2;
+      const cy = run.bossIntroFrom ? run.bossIntroFrom.y : ROOM_H / 2;
+      const sx = cx * view.scale + view.ox;
+      const sy = cy * view.scale + view.oy;
+      const diag = Math.hypot(view.w, view.h);
+      if (p < 0.3) {
+        // 0 ~ 0.3：黑屏淡入
+        const a = p / 0.3;
+        ctx.fillStyle = `rgba(0,0,0,${a})`;
+        ctx.fillRect(0, 0, view.w, view.h);
+      } else if (p < 0.7) {
+        // 0.3 ~ 0.7：黑屏开洞 + 白色光环扩散
+        const q = (p - 0.3) / 0.4; // 0→1
+        const r = diag * q;
+        const innerR = Math.max(0, r - 30 * view.scale);
+        // 先盖全屏黑
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, view.w, view.h);
+        // 用合成模式挖出圆形
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(sx, sy, innerR, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+        // 白色光环（宽 22px）
+        ctx.strokeStyle = `rgba(255,255,255,${0.65 * (1 - q)})`;
+        ctx.lineWidth = 22;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, TAU);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(255,255,255,${0.3 * (1 - q)})`;
+        ctx.lineWidth = 44;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r - 44, 0, TAU);
+        ctx.stroke();
+      } else {
+        // 0.7 ~ 1.0：光环收缩淡出
+        const q = (p - 0.7) / 0.3; // 0→1
+        const r = diag * (1 - q * 0.6);
+        const innerR = Math.max(0, r - 20 * view.scale);
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(sx, sy, innerR, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+        ctx.strokeStyle = `rgba(255,255,255,${0.5 * (1 - q)})`;
+        ctx.lineWidth = 16;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, TAU);
+        ctx.stroke();
+      }
+    }
     // 受击闪红
     if (run.redFlash > 0) {
       ctx.fillStyle = `rgba(255,40,40,${run.redFlash * 0.9})`;
@@ -5391,6 +5561,79 @@
     return w;
   }
 
+  function drawCoin(c, cx, cy, k) {
+    // 像素金币 sprite（8×8，放大 k 倍）
+    const SPR = [
+      '..XXXX..',
+      '.XYYYYX.',
+      'XYYWWYYX',
+      'XYWWWWYX',
+      'XYYYYYYX',
+      'XYDDDDYX',
+      '.XYYYYX.',
+      '..XXXX..'
+    ];
+    const map = { X: '#6b4d0a', Y: '#ffd43b', W: '#fff3bf', D: '#f59f00' };
+    for (let py = 0; py < SPR.length; py++) {
+      const row = SPR[py];
+      for (let px = 0; px < row.length; px++) {
+        const ch2 = row[px];
+        if (ch2 !== '.') {
+          c.fillStyle = map[ch2] || '#ffd43b';
+          c.fillRect(cx + px * k, cy + py * k, k, k);
+        }
+      }
+    }
+  }
+
+  function drawHeartRow(c, cx, cy, count, filled, perHeart) {
+    // 像素心形 sprite：9×8 像素格
+    const HEART = [
+      '.XX.XX.',
+      'XXXXXXX',
+      'XXXXXXX',
+      'XXXXXXX',
+      '.XXXXX.',
+      '..XXX..',
+      '...X...',
+      '.......'
+    ];
+    const gx = cx, gy = cy;
+    const total = count;
+    const step = 13;
+    for (let i = 0; i < total; i++) {
+      const hx = gx + i * step;
+      const hy = gy;
+      const hpStart = i * perHeart;
+      const hpEnd = (i + 1) * perHeart;
+      const frac = Math.max(0, Math.min(1, (filled - hpStart) / perHeart));
+      const filledPx = frac >= 1 ? 999 : Math.round(frac * 56); // 56 = 7*8
+      let drawn = 0;
+      for (let py = 0; py < 8; py++) {
+        const row = HEART[py];
+        for (let px = 0; px < 7; px++) {
+          if (row[px] === 'X') {
+            const isFilled = drawn < filledPx;
+            const col = isFilled ? '#ff6b6b' : '#2b0a10';
+            c.fillStyle = col;
+            c.fillRect(hx + px * 2, hy + py * 2, 2, 2);
+            if (isFilled) {
+              // 高光
+              if (py < 3 && px < 4 && (px + py) < 5) {
+                c.fillStyle = '#ffc9c9';
+                c.fillRect(hx + px * 2, hy + py * 2, 2, 2);
+              } else {
+                c.fillStyle = '#c92a2a';
+                c.fillRect(hx + px * 2, hy + py * 2 + 1, 2, 1);
+              }
+            }
+            drawn++;
+          }
+        }
+      }
+    }
+  }
+
   function pxBar(x, y, w, h, frac, color, label, icon) {
     const c = ctx;
     const f = clamp(frac, 0, 1);
@@ -5486,26 +5729,35 @@
     const ch = run.char;
     // 状态面板（左上）
     ctx.fillStyle = 'rgba(6,8,12,.80)';
-    ctx.fillRect(14, 12, 302, 86);
+    ctx.fillRect(14, 12, 302, 96);
     ctx.fillStyle = '#31384a';
     ctx.fillRect(14, 12, 302, 3);
-    ctx.fillRect(14, 95, 302, 3);
-    ctx.fillRect(14, 12, 3, 86);
-    ctx.fillRect(313, 12, 3, 86);
+    ctx.fillRect(14, 105, 302, 3);
+    ctx.fillRect(14, 12, 3, 96);
+    ctx.fillRect(313, 12, 3, 96);
     ctx.fillStyle = 'rgba(255,255,255,.07)';
     ctx.fillRect(17, 15, 296, 1);
     ctx.fillStyle = '#0a0c11';
-    ctx.fillRect(17, 96, 296, 2);
-    pxBar(58, 24, 240, 20, run.hp / run.maxHp, '#ff6b6b', `${Math.max(0, Math.ceil(run.hp))} / ${run.maxHp}`, 'heart');
-    pxBar(58, 51, 240, 14, run.energy / run.maxEnergy, '#4dabf7', '', 'bolt');
-    if (run.shield > 0) pxBar(58, 71, 240, 10, run.shield / Math.max(1, run.maxShield || run.shield), '#ced4da', '', 'shield');
+    ctx.fillRect(17, 106, 296, 2);
+    // 像素心形血条：根据 maxHp 自适应颗数
+    const perHeart = run.maxHp > 14 ? 2 : 1;
+    const heartCount = Math.ceil(run.maxHp / perHeart);
+    drawHeartRow(ctx, 58, 22, heartCount, run.hp, perHeart);
+    // HP 数字小字在心形下方
+    ctx.fillStyle = '#e9ecef';
+    ctx.font = font(11, 800);
+    ctx.fillText(`${Math.max(0, Math.ceil(run.hp))} / ${run.maxHp}`, 58 + Math.min(heartCount, 12) * 13 + 8, 38);
+    pxBar(58, 44, 240, 14, run.energy / run.maxEnergy, '#4dabf7', '', 'bolt');
+    if (run.shield > 0) pxBar(58, 64, 240, 10, run.shield / Math.max(1, run.maxShield || run.shield), '#ced4da', '', 'shield');
     // 楼层 / 金币 / 进度
     ctx.fillStyle = '#e9ecef';
     ctx.font = font(14, 800);
     ctx.fillText(`第 ${run.floor + 1} 层 · ${FLOORS[run.floor].name}`, 18, 122);
     ctx.fillStyle = '#ffd43b';
     ctx.font = font(13, 800);
-    ctx.fillText('◆', 18, 143);
+    // 金币图标（跳动）
+    const coinBob = Math.sin(G.time * 6) * 1.2;
+    drawCoin(ctx, 16, 130 + coinBob, 2);
     pxNum(run.coins, 38, 132, 2, '#ffd43b');
     ctx.fillStyle = '#adb5bd';
     ctx.font = font(12, 700);
@@ -6039,12 +6291,12 @@
     let list = [];
     if (tabIdx === 0) {
       list = Object.keys(WEAPONS).map((k) => WEAPONS[k]).filter((w) => w && w.name);
-      list = list.map((w) => ({ n: w.name, s: (w.fam || '-') + ' · 伤害 ' + (w.dmg != null ? w.dmg : '-'), c: w.color || '#ffd43b' }));
+      list = list.map((w) => ({ n: w.name, s: (w.fam || '-') + ' · 伤害 ' + (w.dmg != null ? w.dmg : '-'), c: w.color || '#ffd43b', fam: w.fam, id: w.id }));
     } else if (tabIdx === 1) {
       list = Object.keys(ENEMIES).map((k) => ENEMIES[k]).filter((e) => e && e.name);
-      list = list.map((e) => ({ n: e.name, s: 'HP ' + (e.hp != null ? e.hp : '-') + ' · ' + (e.shape || 'blob'), c: e.color || '#8b5cf6' }));
+      list = list.map((e) => ({ n: e.name, s: 'HP ' + (e.hp != null ? e.hp : '-') + ' · ' + (e.shape || 'blob'), c: e.color || '#8b5cf6', def: e }));
     } else {
-      list = RELICS.map((r) => ({ n: r.name, s: RARITY[r.rar].name + ' · ' + String(r.desc || '').slice(0, 14), c: RARITY[r.rar].color }));
+      list = RELICS.map((r) => ({ n: r.name, s: RARITY[r.rar].name + ' · ' + String(r.desc || '').slice(0, 14), c: RARITY[r.rar].color, rune: true }));
     }
     const per = 24, page = G.codexPage || 0;
     const total = Math.max(1, Math.ceil(list.length / per));
@@ -6060,10 +6312,27 @@
       c.fillStyle = '#0f141c'; c.fillRect(x + 5, y + 5, cw - 10, chh - 10);
       // 图标
       c.fillStyle = '#05070b'; c.fillRect(x + 14, y + 16, 46, 46);
-      c.fillStyle = it.c; c.fillRect(x + 16, y + 18, 42, 42);
-      c.fillStyle = '#0b0f14'; c.font = font(22, 900); c.textAlign = 'center';
-      c.fillText(it.n[0], x + 37, y + 48);
-      c.textAlign = 'left';
+      c.fillStyle = '#141a24'; c.fillRect(x + 16, y + 18, 42, 42);
+      c.fillStyle = it.c; c.fillRect(x + 16, y + 18, 42, 2); c.fillRect(x + 16, y + 58, 42, 2);
+      if (it.fam) {
+        drawWeaponIcon(c, it.fam, it.c, x + 37, y + 39, 1.25, it.id, true);
+      } else if (it.def) {
+        drawPxEnemy(c, { x: x + 37, y: y + 40, r: 9 + clamp((it.def.hp || 20) / 50, 0, 5), def: it.def }, 1, 0, 0);
+      } else if (it.rune) {
+        const rx = x + 37, ry = y + 39, rs = 12;
+        c.fillStyle = hexA(it.c, 0.22);
+        c.beginPath(); c.moveTo(rx, ry - rs); c.lineTo(rx + rs, ry); c.lineTo(rx, ry + rs); c.lineTo(rx - rs, ry); c.closePath(); c.fill();
+        c.fillStyle = it.c;
+        c.beginPath(); c.moveTo(rx, ry - rs + 3); c.lineTo(rx + rs - 3, ry); c.lineTo(rx, ry + rs - 3); c.lineTo(rx - rs + 3, ry); c.closePath(); c.fill();
+        c.fillStyle = '#0b0f14';
+        c.fillRect(rx - 3, ry - 3, 6, 6);
+        c.fillStyle = it.c;
+        c.fillRect(rx - 1, ry - 1, 2, 2);
+      } else {
+        c.fillStyle = '#0b0f14'; c.font = font(22, 900); c.textAlign = 'center';
+        c.fillText(it.n[0], x + 37, y + 48);
+        c.textAlign = 'left';
+      }
       c.fillStyle = '#f8f9fa'; c.font = font(14, 800);
       c.fillText(it.n, x + 70, y + 36);
       c.fillStyle = 'rgba(255,255,255,.42)'; c.font = font(10, 600);
