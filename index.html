@@ -4941,10 +4941,10 @@
     const R = Math.max(7, Math.round(PLAYER_R * K * 1.75));
     const sk = run.skin || 0;
     const body = tint(ch.color, sk), hair = tint(ch.accent, sk);
-    const dark = '#0b0f14';
-    c.fillStyle = 'rgba(0,0,0,.42)';
-    c.fillRect(X - R + 1, Y + R - 1, R * 2 - 2, Math.max(1, Math.round(R * 0.35)));
-    c.fillRect(X - R + 3, Y + R, R * 2 - 6, 1);
+    c.fillStyle = 'rgba(0,0,0,.30)';
+    c.fillRect(X - 8, Y + 9, 16, 3);
+    c.fillStyle = 'rgba(0,0,0,.16)';
+    c.fillRect(X - 10, Y + 11, 20, 1);
     if (run.shield > 0) {
       c.fillStyle = '#74c0fc';
       c.globalAlpha = 0.35 + Math.abs(Math.sin(G.time * 5)) * 0.35;
@@ -4954,148 +4954,189 @@
       c.globalAlpha = 1;
     }
     const blink = run.invuln > 0 && Math.floor(G.time * 20) % 2 === 0;
-    c.globalAlpha = blink ? 0.5 : 1;
+    c.globalAlpha = blink ? 0.45 : 1;
     const fx = Math.cos(p.ang), fy = Math.sin(p.ang);
     const dir = Math.abs(fx) > Math.abs(fy) ? (fx > 0 ? 1 : 3) : (fy > 0 ? 0 : 2);
     const moving = Math.hypot(p.vx || 0, p.vy || 0) > 20;
-    const frame = moving ? (Math.floor(G.time * 8) % 2) : 0;
-    // 披风（朝向反向飘动）
-    const back = dir === 1 ? -1 : dir === 3 ? 1 : 0;
-    const backY = dir === 0 ? -1 : dir === 2 ? 1 : 0;
-    c.fillStyle = dark;
-    c.fillRect(X + back * (R - 1) - Math.round(R * 0.75), Y - Math.round(R * 0.4) + backY * (R - 3), Math.round(R * 1.5), Math.round(R * 1.5));
-    c.fillStyle = hair;
-    c.fillRect(X + back * (R - 2) - Math.round(R * 0.6), Y - Math.round(R * 0.3) + backY * (R - 3), Math.round(R * 1.2), Math.round(R * 1.2));
-    // 头部（窄）+ 躯干（宽），粗描边
-    const hr = Math.max(3, Math.round(R * 0.74));
-    const hd = Math.max(4, Math.round(R * 1.05));
-    const headTop = Y - R;
-    const bodyTop = headTop + hd;
-    c.fillStyle = dark;
-    c.fillRect(X - hr - 1, headTop - 1, hr * 2 + 2, hd + 2);
-    c.fillRect(X - R - 1, bodyTop - 1, R * 2 + 2, Y + R - bodyTop + 2);
-    // 躯干（受击挤压帧 / 开火前倾帧）
+    const step = moving ? (Math.floor(G.time * 9) % 2) : 0;
+    const bob = moving ? step : Math.round(Math.sin(G.time * 2.4) * 1.2);
     const hurtP = run.hurtAt && G.time - run.hurtAt < 0.14;
     const atkP = run.muzzleAt && G.time - run.muzzleAt < 0.12;
-    const bw = hurtP ? R + 1 : R;
-    const bt = hurtP ? bodyTop + 1 : bodyTop;
-    const bb = hurtP ? Y + R - 1 : Y + R;
-    c.fillStyle = body;
-    c.fillRect(X - bw, bt, bw * 2, bb - bt);
-    c.fillStyle = hexShade(body, -0.28);
-    c.fillRect(X - bw, bb - 3, bw * 2, 3);
-    c.fillStyle = hexShade(body, 0.3);
-    c.fillRect(X - bw + 1, bt, 2, bb - bt);
-    if (atkP) {
-      // 持枪手前伸
-      c.fillStyle = dark;
-      c.fillRect(X + Math.round(fx * 3) - 2, Y + Math.round(fy * 3) - 2, 4, 4);
-      c.fillStyle = '#e8c39e';
-      c.fillRect(X + Math.round(fx * 4) - 1, Y + Math.round(fy * 4) - 1, 2, 2);
+    const DARK = '#0b0f14', SKIN = '#f2cba3', SKIN2 = '#d9a97e';
+    const bodyHi = hexShade(body, 0.28), bodyLo = hexShade(body, -0.3);
+    const hairHi = hexShade(hair, 0.22), hairLo = hexShade(hair, -0.34);
+    // 精灵格：16 宽 × 20 高，1 格 ≈ 1 个低分辨率像素
+    const GY = Y - 10 + (hurtP ? 1 : 0) + (bob ? 1 : 0);
+    const backView = dir === 2;
+    // 披风：朝反方向飘，带风摆
+    const capeX = dir === 1 ? -3 : dir === 3 ? 3 : 0;
+    const capeY = dir === 0 ? 2 : dir === 2 ? -2 : 0;
+    const flut = Math.round(Math.sin(G.time * 6) * 1);
+    // 轮廓 pass：同形状偏移 1px 用深色绘制，得到干净的 1px 描边
+    let oc = null, odx = 0, ody = 0;
+    const P = (gx, gy, gw, gh, col) => {
+      c.fillStyle = oc || col;
+      c.fillRect(X + gx + odx, GY + gy + ody, gw, gh);
+    };
+    const drawBody = () => {
+      // 披风（小一号，避免变成黑块）
+      P(-2 + capeX, 9 + capeY, 6, 6, hairLo);
+      P(-1 + capeX + flut, 10 + capeY, 4, 4, hexShade(hair, -0.5));
+      P(-3 - capeX, 12, 3, 2, hairLo);
+      // 腿 / 靴
+      const l1 = step ? 1 : 0, l2 = step ? -1 : 0;
+      P(-4, 15, 3, 4, bodyLo);
+      P(1, 15, 3, 4, bodyLo);
+      P(-5, 19 + l1, 4, 2, '#2b3340');
+      P(0, 19 + l2, 4, 2, '#2b3340');
+      // 躯干
+      P(-4, 7, 8, 8, body);
+      P(-4, 7, 2, 8, bodyHi);
+      P(2, 7, 2, 8, bodyLo);
+      // 肩甲
+      P(-5, 7, 2, 3, hair);
+      P(3, 7, 2, 3, hair);
+      // 围巾 + 尾
+      P(-4, 7, 8, 2, hair);
+      P(-4 - capeX, 8, 3, 3, hairLo);
+      // 腰带 + 扣
+      P(-4, 13, 8, 2, '#2b3340');
+      P(-1, 13, 2, 2, hair);
+      // 手臂（开火时前伸）
+      if (atkP) {
+        P(-4 + Math.round(fx * 2), 9 + Math.round(fy), 2, 3, SKIN2);
+        P(2 + Math.round(fx * 2), 9 + Math.round(fy), 2, 3, SKIN2);
+      } else {
+        P(-5, 9, 2, 4, SKIN);
+        P(3, 9, 2, 4, SKIN);
+      }
+      // 头
+      P(-5, 0, 10, 8, SKIN);
+      if (backView) {
+        P(-5, 0, 10, 7, hair);
+        P(-4, 0, 6, 1, hairHi);
+        P(-4, 4, 8, 3, hairLo);
+        P(-2, 2, 4, 2, hexShade(hair, -0.18));
+      } else {
+        P(-5, 0, 10, 3, hair);
+        P(-5, 0, 2, 6, hair);
+        P(3, 0, 2, 6, hair);
+        P(-4, 0, 5, 1, hairHi);
+        P(-5, 2, 3, 1, hairLo);
+        P(-3, 4, 2, 2, DARK);
+        P(1, 4, 2, 2, DARK);
+        P(-3, 4, 1, 1, '#ffffff');
+        P(1, 4, 1, 1, '#ffffff');
+        P(-4, 6, 1, 1, SKIN2);
+        P(3, 6, 1, 1, SKIN2);
+        P(-1, 6, 2, 1, SKIN2);
+        if (dir === 1) P(2, 0, 1, 3, SKIN);
+        if (dir === 3) P(-3, 0, 1, 3, SKIN);
+      }
+    };
+    oc = DARK;
+    for (let i = 0; i < 4; i++) {
+      odx = i === 0 ? -1 : i === 1 ? 1 : 0;
+      ody = i === 2 ? -1 : i === 3 ? 1 : 0;
+      drawBody();
     }
-    // 头部
-    c.fillStyle = '#e8c39e';
-    c.fillRect(X - hr, headTop, hr * 2, hd);
-    c.fillStyle = hair;
-    if (dir === 2) {
-      // 背面：整头后脑
-      c.fillRect(X - hr, headTop, hr * 2, hd);
-      c.fillStyle = hexShade(hair, -0.2);
-      c.fillRect(X - hr, headTop, hr * 2, 2);
-    } else {
-      c.fillRect(X - hr, headTop, hr * 2, Math.max(3, Math.round(hd * 0.55)));
-      c.fillRect(X - hr, headTop, 2, hd);
-      c.fillRect(X + hr - 2, headTop, 2, hd);
-      c.fillStyle = hexShade(hair, -0.35);
-      c.fillRect(X - hr, headTop + Math.max(3, Math.round(hd * 0.55)) - 1, hr * 2, 1);
-      if (dir === 1) c.fillRect(X - hr, headTop, 2, hd);
-      if (dir === 3) c.fillRect(X + hr - 2, headTop, 2, hd);
-    }
-    // 眼睛（按朝向）
-    const ey = headTop + Math.round(hd * 0.58);
-    c.fillStyle = '#0b0f14';
-    if (dir === 0) {
-      c.fillRect(X - 3, ey, 2, 2);
-      c.fillRect(X + 1, ey, 2, 2);
-      c.fillStyle = '#f8f9fa';
-      c.fillRect(X - 3, ey, 1, 1);
-      c.fillRect(X + 1, ey, 1, 1);
-    } else if (dir === 1) {
-      c.fillRect(X + 2, ey, 2, 2);
-    } else if (dir === 3) {
-      c.fillRect(X - 4, ey, 2, 2);
-    }
-    // 脚（两帧交替）
-    c.fillStyle = '#0b0f14';
-    if (frame === 0 || !moving) {
-      c.fillRect(X - R + 1, Y + R, 4, 2);
-      c.fillRect(X + R - 5, Y + R, 4, 2);
-    } else {
-      c.fillRect(X - R + 2, Y + R, 4, 2);
-      c.fillRect(X + R - 6, Y + R + 1, 4, 1);
-    }
-    // 腰带 / 肩甲 / 手套
-    c.fillStyle = '#0b0f14';
-    c.fillRect(X - R + 1, Y + R - 5, R * 2 - 2, 2);
-    c.fillStyle = hair;
-    c.fillRect(X - 2, Y + R - 5, 4, 2);
-    c.fillStyle = hexShade(hair, -0.25);
-    c.fillRect(X - R - 1, bodyTop + 2, 3, 4);
-    c.fillRect(X + R - 2, bodyTop + 2, 3, 4);
-    // 武器（按弹道族绘制不同剪影）
+    oc = null; odx = 0; ody = 0;
+    drawBody();
+    // 武器：按弹道族绘制 1px 精修剪影（枪管 / 机匣 / 握把 / 弹匣 / 瞄具 / 刀身 / 法球）
     const w = curWeapon();
     const rk = (run.muzzleAt && G.time - run.muzzleAt < 0.1) ? 2 : 0;
     if (w) {
-      c.save();
-      c.translate(-fx * rk, -fy * rk);
       const fam = w.fam;
-      const len = (fam === 'melee' || fam === 'shotgun' || fam === 'launcher') ? R + 5 : R + 8;
-      const put = (t, s, col, sz) => {
-        const qx = X + fx * t - fy * (s + 3), qy = Y + fy * t + fx * (s + 3);
+      const wc = w.color || '#ffd43b';
+      const wHi = hexShade(wc, 0.4), wLo = hexShade(wc, -0.35);
+      const metal = '#414b5e', metalHi = '#939db0';
+      const wood = '#7a5433', woodHi = '#9c7047', woodLo = '#5e4026';
+      const len = fam === 'melee' ? R + 5 : (fam === 'shotgun' || fam === 'launcher') ? R + 3 : R + 6;
+      const GOFF = 4; // 让枪从身体外侧开始，不压住胸口
+      const put = (t, s, col, sw, sh) => {
+        const qx = Math.round(X + fx * (t + GOFF) - fy * s) - (rk ? Math.round(fx) : 0);
+        const qy = Math.round(Y + fy * (t + GOFF) + fx * s) - (rk ? Math.round(fy) : 0);
         c.fillStyle = col;
-        c.fillRect(Math.round(qx) - ((sz / 2) | 0), Math.round(qy) - ((sz / 2) | 0), sz, sz);
+        c.fillRect(qx, qy, sw || 1, sh || 1);
       };
-      for (let t = 2; t <= len; t++) put(t, 0, dark, 3);
+      const strip = (t0, t1, s, col, sz) => { for (let t = t0; t <= t1; t++) put(t, s, col, sz || 1, sz || 1); };
+      const H = 1;
+      const outline = (t0, t1, s) => { strip(t0, t1, s, DARK); };
       if (fam === 'melee') {
-        for (let t = 3; t <= len; t++) put(t, 0, t > len - 2 ? '#f8f9fa' : w.color, 2);
-        put(2, -2, '#8a6b3d', 2);
-        put(2, 2, '#8a6b3d', 2);
+        // 刀身：1px 刃 + 上下描边 + 护手
+        outline(5, len, H - 1); outline(5, len, H + 1);
+        strip(5, len, H, '#cfd8e3');
+        put(len, H, '#ffffff');
+        put(4, H - 2, wood, 1, 5);
+        put(3, H, woodHi, 2, 2);
       } else if (fam === 'shotgun') {
-        for (let t = 3; t <= len; t++) put(t, 0, w.color, 2);
-        put(len, -2, w.color, 2);
-        put(len, 2, w.color, 2);
-        put(3, -2, '#4a3a28', 2);
+        // 双管霰弹：上下两管 + 泵动护木
+        outline(3, len, H - 2); outline(3, len, H + 2);
+        strip(4, len, H - 1, wc);
+        strip(4, len, H + 1, wLo);
+        strip(5, len, H, wHi);
+        put(2, H + 2, wood, 3, 2);
+        put(len + 1, H - 1, '#fff3bf', 2, 2);
       } else if (fam === 'launcher') {
-        for (let t = 3; t <= len; t++) put(t, 0, w.color, 4);
-        put(len + 1, 0, '#0b0f14', 3);
-      } else if (fam === 'summon' || fam === 'flame' || fam === 'charge') {
-        for (let t = 3; t <= len - 1; t++) put(t, 0, '#8a6b3d', 2);
-        put(len, 0, w.color, 3);
-        put(len, 0, '#f8f9fa', 1);
+        // 榴弹：粗管 + 喇叭口
+        outline(3, len, H - 2); outline(3, len, H + 2);
+        strip(4, len, H - 1, wc);
+        strip(4, len, H + 1, wc);
+        put(len + 1, H - 2, DARK, 3, 4);
+        put(len + 2, H - 1, wc, 2, 2);
       } else if (fam === 'laser' || fam === 'rail' || fam === 'chain') {
-        for (let t = 3; t <= len; t++) put(t, 0, w.color, 2);
-        for (let t = 5; t <= len; t++) put(t, 0, '#f8f9fa', 1);
-        put(2, 0, '#2b3040', 3);
+        // 能量武器：金属管 + 发光芯 + 瞄具
+        outline(3, len, H - 1); outline(3, len, H + 1);
+        strip(4, len, H, metal);
+        strip(6, len, H, wc);
+        put(4, H - 2, metalHi, 4, 1);
+        put(len + 1, H, hexA(wc, 0.6), 3, 3);
+      } else if (fam === 'summon' || fam === 'flame' || fam === 'charge') {
+        // 法杖：木杖 + 发光法球
+        strip(3, len, H, wood);
+        strip(4, len, H, woodHi);
+        put(len + 1, H - 1, DARK, 3, 3);
+        put(len + 1, H - 1, wc, 2, 2);
+        put(len + 1, H, '#ffffff');
+      } else if (fam === 'bounce' || fam === 'boomerang') {
+        // 双叉 / 回旋
+        outline(4, len, H - 1); strip(5, len, H - 1, wc);
+        outline(4, len, H + 2); strip(5, len, H + 2, wLo);
+        put(3, H, wood, 2, 2);
       } else {
-        for (let t = 3; t <= len; t++) put(t, 0, w.color, 2);
-        put(len, 0, '#f8f9fa', 1);
-        put(2, -2, '#4a3a28', 2);
-        put(4, 2, '#2b3040', 2);
+        // 步枪：枪托 + 机匣 + 枪管 + 弹匣 + 瞄具
+        put(2, H - 1, wood, 2, 2);
+        put(3, H, DARK, 1, 2);
+        put(4, H - 1, metal, 2, 2);
+        outline(6, len, H - 1);
+        outline(6, len, H + 1);
+        strip(6, len, H, wc);
+        put(5, H + 2, DARK, 2, 3);
+        put(5, H + 1, metal, 2, 1);
+        put(5, H - 2, metalHi, 2, 1);
+        put(len + 1, H, '#fff3bf');
+        put(5, H - 2, metalHi, 2, 1);
+        put(len + 1, H, '#fff3bf');
       }
-      // 枪口火花
+      // 枪口火花：小十字星 + 两层光晕
       if (rk) {
-        const mx = X + fx * (len + 3) - fy * 3, my = Y + fy * (len + 3) + fx * 3;
-        c.fillStyle = 'rgba(255,212,59,.75)';
-        c.fillRect(Math.round(mx) - 2, Math.round(my) - 2, 5, 5);
-        c.fillStyle = '#fff3bf';
-        c.fillRect(Math.round(mx) - 1, Math.round(my) - 1, 3, 3);
+        const mx = Math.round(X + fx * (len + 3 + GOFF) - fy * H);
+        const my = Math.round(Y + fy * (len + 3 + GOFF) + fx * H);
+        c.fillStyle = hexA(wc, 0.20); c.fillRect(mx - 3, my - 3, 7, 7);
+        c.fillStyle = '#ffd43b';
+        c.fillRect(mx - 3, my, 7, 1);
+        c.fillRect(mx, my - 3, 1, 7);
+        c.fillStyle = '#fff8dc'; c.fillRect(mx - 1, my - 1, 3, 3);
+        c.fillStyle = '#ffffff'; c.fillRect(mx, my, 1, 1);
       }
-      c.restore();
     }
-    // 受击闪白
+    // 受击闪白（贴合精灵轮廓）
     if (run.hurtAt && G.time - run.hurtAt < 0.12) {
-      c.fillStyle = 'rgba(255,255,255,.55)';
-      c.fillRect(X - R, Y - R, R * 2, R * 2 + 2);
+      c.globalAlpha = 0.55;
+      c.fillStyle = '#ffffff';
+      c.fillRect(X - 5, GY - 1, 10, 19);
+      c.fillRect(X - 4, GY + 18, 8, 2);
+      c.globalAlpha = blink ? 0.45 : 1;
     }
     c.globalAlpha = 1;
   }
@@ -6430,7 +6471,7 @@
       c.fillStyle = pg; c.fillRect(x + 5, y + 5, cw - 10, 76);
       c.fillStyle = 'rgba(255,255,255,.035)';
       for (let gy = y + 9; gy < y + 79; gy += 6) c.fillRect(x + 5, gy, cw - 10, 1);
-      miniHero(x + cw / 2, y + 30, tint(ch.color, skCur), tint(ch.accent, skCur), WEAPONS[ch.weapon], 1.7);
+      miniHero(x + cw / 2, y + 29, tint(ch.color, skCur), tint(ch.accent, skCur), WEAPONS[ch.weapon], 1.95);
       c.fillStyle = 'rgba(255,255,255,.06)'; c.fillRect(x + 5, y + 79, cw - 10, 1);
       // 名字条
       c.fillStyle = ch.color; c.fillRect(x + 5, y + 82, cw - 10, 26);
