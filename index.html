@@ -4837,6 +4837,56 @@
     ctx.restore();
   }
 
+  // 2D 阴影投射：以玩家为光源，把障碍矩形背光面挤出成阴影体
+  const SH = { cv: document.createElement('canvas'), c: null };
+  SH.c = SH.cv.getContext('2d');
+  function drawShadowPass(room, K, ox, oy, w, h) {
+    const g = SH.c;
+    if (SH.cv.width !== w || SH.cv.height !== h) { SH.cv.width = w; SH.cv.height = h; }
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = 'rgba(0,0,0,0.55)';
+    g.fillRect(0, 0, w, h);
+    const p = G.run.player;
+    const px = p.x * K + ox, py = p.y * K + oy;
+    const rad = 330 * K;
+    g.globalCompositeOperation = 'destination-out';
+    const rg = g.createRadialGradient(px, py, rad * 0.3, px, py, rad);
+    rg.addColorStop(0, 'rgba(0,0,0,1)');
+    rg.addColorStop(0.7, 'rgba(0,0,0,0.88)');
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = rg;
+    g.beginPath(); g.arc(px, py, rad, 0, TAU); g.fill();
+    g.globalCompositeOperation = 'source-over';
+    g.fillStyle = 'rgba(2,3,6,0.9)';
+    const L = 700 * K;
+    for (const o of room.obstacles) {
+      const x1 = o.x * K + ox, y1 = o.y * K + oy;
+      const x2 = (o.x + o.w) * K + ox, y2 = (o.y + o.h) * K + oy;
+      const cs = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
+      const nr = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+      for (let i = 0; i < 4; i++) {
+        const a = cs[i], b = cs[(i + 1) % 4], n = nr[i];
+        const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+        let dx = mx - px, dy = my - py;
+        const dl = Math.hypot(dx, dy) || 1;
+        if (n[0] * dx + n[1] * dy <= 0) continue;
+        dx /= dl; dy /= dl;
+        g.beginPath();
+        g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]);
+        g.lineTo(b[0] + dx * L, b[1] + dy * L);
+        g.lineTo(a[0] + dx * L, a[1] + dy * L);
+        g.closePath(); g.fill();
+      }
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(SH.cv, 0, 0, w, h, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+
   function renderWorld() {
     const run = G.run;
     if (!run || !run.room) return;
@@ -4895,6 +4945,7 @@
     ctx.drawImage(PX.cv, 0, 0, w, h, 0, 0, canvas.width, canvas.height);
     ctx.imageSmoothingEnabled = true;
     drawPxLights(room, cfg);
+    drawShadowPass(room, K, ox, oy, w, h);
     ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
     // 暗角
     const vg = ctx.createRadialGradient(view.w / 2, view.h / 2, Math.min(view.w, view.h) * 0.38, view.w / 2, view.h / 2, Math.max(view.w, view.h) * 0.78);
