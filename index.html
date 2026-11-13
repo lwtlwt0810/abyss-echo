@@ -188,7 +188,7 @@
   function defaultSave() {
     const meta = {};
     for (const k of META_IDS) meta[k] = 0;
-    return { gold: 0, meta, threat: 0, bestFloor: 1, runs: 0, kills: 0, wins: 0, bestTime: 0, sound: true, music: true, aimAssist: true, echoBlade: false };
+    return { gold: 0, meta, threat: 0, bestFloor: 1, runs: 0, kills: 0, wins: 0, bestTime: 0, sound: true, music: true, aimAssist: true, echoBlade: false, skins: {} };
   }
   function loadSave() {
     const d = defaultSave();
@@ -211,6 +211,12 @@
       if (typeof s.music === 'boolean') d.music = s.music;
       if (typeof s.aimAssist === 'boolean') d.aimAssist = s.aimAssist;
       if (typeof s.echoBlade === 'boolean') d.echoBlade = s.echoBlade;
+      if (s.skins && typeof s.skins === 'object') {
+        for (const k in s.skins) {
+          const v = clamp(Math.floor(Number(s.skins[k]) || 0), 0, 2);
+          if (v > 0) d.skins[k] = v;
+        }
+      }
     } catch (e) { /* 存档损坏回退默认 */ }
     return d;
   }
@@ -1092,6 +1098,7 @@
     const st = metaStats();
     const run = {
       char: ch, charIdx,
+      skin: (save.skins && save.skins[charIdx]) || 0,
       floor: 0, dungeon: null, room: null, rooms: null,
       maxHp: Math.round(st.hp * (ch.hp / 120)), hp: 0,
       maxEnergy: Math.round(st.energy * (ch.energy / 100)), energy: 0,
@@ -2198,7 +2205,7 @@
     hitstop(0.06);
     shake(0.05);
     burst(e.x, e.y, e.def.color, e.elite ? 18 : 10, 240, 4, 0.45);
-    run.effects.push({ type: 'shatter', x: e.x, y: e.y, r: e.r, color: e.def.color, seed: Math.random() * TAU, t: 0.42, life: 0.42 });
+    run.effects.push({ type: 'shatter', x: e.x, y: e.y, r: e.r, color: e.def.color, seed: Math.random() * TAU, n: e.r >= 22 ? 14 : e.r >= 13 ? 10 : 7, big: e.r >= 22, t: e.r >= 22 ? 0.55 : 0.42, life: e.r >= 22 ? 0.55 : 0.42 });
     const gold = Math.round((2 + run.floor * 1.5) * (e.def.prize || 1) * (e.elite ? 3 : 1) * (1 + run.mods.gold));
     addPickup(e.x, e.y, 'gold', gold);
     run.combo++; run.comboT = 2.4;
@@ -3683,15 +3690,21 @@
       c.fillRect(o.x + 5, o.y + 7, o.w, o.h);
       c.fillStyle = '#05070b';
       c.fillRect(o.x - 2, o.y - 2, o.w + 4, o.h + 4);
-      c.fillStyle = cfg.wall;
+      c.fillStyle = hexShade(cfg.wall, 0.14);
       c.fillRect(o.x, o.y, o.w, o.h);
-      c.fillStyle = hexShade(cfg.wallHi, -0.08);
+      c.fillStyle = hexShade(cfg.wallHi, 0.12);
       c.fillRect(o.x, o.y, o.w, Math.max(3, o.h * 0.16));
-      c.fillStyle = hexShade(cfg.wall, -0.45);
+      c.fillStyle = hexShade(cfg.wall, -0.35);
       c.fillRect(o.x, o.y + o.h - Math.max(3, o.h * 0.18), o.w, Math.max(3, o.h * 0.18));
       c.fillStyle = 'rgba(0,0,0,.22)';
       for (let y = o.y + 14; y < o.y + o.h - 6; y += 14) c.fillRect(o.x, y, o.w, 2);
       for (let x = o.x + 18; x < o.x + o.w - 6; x += 20) c.fillRect(x, o.y, 2, o.h);
+      // 中央符文：让柱子一眼可辨
+      const mcx = o.x + o.w / 2, mcy = o.y + o.h / 2, msz = Math.max(4, Math.min(o.w, o.h) * 0.16);
+      c.fillStyle = hexA(cfg.accent, 0.30);
+      c.beginPath();
+      c.moveTo(mcx, mcy - msz); c.lineTo(mcx + msz, mcy); c.lineTo(mcx, mcy + msz); c.lineTo(mcx - msz, mcy);
+      c.closePath(); c.fill();
     }
   }
 
@@ -4294,7 +4307,7 @@
         c.scale(1.35, 1.35);
         if (s.kind === 'weapon') {
           const w = WEAPONS[s.id];
-          drawWeaponIcon(c, w ? w.fam : 'single', w ? w.color : '#ffd43b', 0, -6, 1.9);
+          drawWeaponIcon(c, w ? w.fam : 'single', w ? w.color : '#ffd43b', 0, -6, 1.9, s.id);
         } else if (s.kind === 'relic') {
           c.fillStyle = '#0a0c11';
           c.beginPath(); c.moveTo(0, -16); c.lineTo(14, 0); c.lineTo(0, 16); c.lineTo(-14, 0); c.closePath(); c.fill();
@@ -4366,12 +4379,19 @@
       } else if (e.type === 'shatter') {
         const fade = Math.max(0, 1 - k * 1.1);
         c.globalAlpha = fade;
-        for (let i = 0; i < 9; i++) {
-          const a = e.seed + i * (TAU / 9);
-          const dd = e.r * (0.3 + k * 2.1);
-          const sz = Math.max(1, Math.round((1 - k) * 6));
+        const n = e.n || 9;
+        for (let i = 0; i < n; i++) {
+          const a = e.seed + i * (TAU / n);
+          const dd = e.r * (0.3 + k * (2.1 + (e.big ? 0.7 : 0)));
+          const sz = Math.max(1, Math.round((1 - k) * (e.big ? 8 : 6)));
           c.fillStyle = i % 3 === 0 ? '#0b0f14' : e.color;
           c.fillRect(Math.round(e.x + Math.cos(a) * dd) - (sz >> 1), Math.round(e.y + Math.sin(a) * dd) - Math.round(k * 14) - (sz >> 1), sz, sz);
+        }
+        if (e.big) {
+          c.globalAlpha = fade * 0.55;
+          c.strokeStyle = e.color;
+          c.lineWidth = 2;
+          c.beginPath(); c.arc(e.x, e.y, e.r * (1 + k * 2), 0, TAU); c.stroke();
         }
         if (k < 0.3) {
           c.globalAlpha = (0.3 - k) * 2.2;
@@ -4441,13 +4461,14 @@
   function drawPxFloor(c, room, cfg, K, ox, oy) {
     const T = Math.max(8, Math.round(64 * K));
     const cols = Math.ceil(ROOM_W / 64), rows = Math.ceil(ROOM_H / 64);
-    const base = hexShade(cfg.tile, 0.075), alt = hexShade(cfg.tile, 0.125), seam = hexShade(cfg.tile, -0.16);
+    const base = hexShade(cfg.tile, 0.06), alt = hexShade(cfg.tile, 0.11), seam = hexShade(cfg.tile, -0.075);
+    const deep = hexShade(cfg.tile, -0.13);
     const half = Math.max(4, Math.round(T / 2));
     for (let ty = 0; ty < rows; ty++) {
       for (let tx = 0; tx < cols; tx++) {
         const hsh = ((tx * 73856093) ^ (ty * 19349663)) >>> 0;
         const x = Math.round(tx * 64 * K + ox), y = Math.round(ty * 64 * K + oy);
-        c.fillStyle = seam;
+        c.fillStyle = (hsh % 9 === 0) ? deep : seam;
         c.fillRect(x, y, T, T);
         // 两行错缝砖
         for (let r = 0; r < 2; r++) {
@@ -4477,6 +4498,22 @@
         }
       }
     }
+    // 房间中央徽记：给地面一个视觉锚点（六边形环 + 内点）
+    const cx = Math.round((ROOM_W / 2) * K + ox), cy = Math.round((ROOM_H / 2) * K + oy);
+    const rr2 = Math.round(140 * K);
+    c.strokeStyle = hexA(cfg.accent, 0.13);
+    c.lineWidth = Math.max(1, Math.round(2 * K * 1.2));
+    c.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = i / 6 * TAU - Math.PI / 2;
+      const px2 = cx + Math.cos(a) * rr2, py2 = cy + Math.sin(a) * rr2 * 0.82;
+      if (i === 0) c.moveTo(px2, py2); else c.lineTo(px2, py2);
+    }
+    c.closePath(); c.stroke();
+    c.strokeStyle = hexA(cfg.accent, 0.08);
+    c.beginPath(); c.arc(cx, cy, rr2 * 0.62, 0, TAU); c.stroke();
+    c.fillStyle = hexA(cfg.accent, 0.07);
+    c.beginPath(); c.arc(cx, cy, rr2 * 0.22, 0, TAU); c.fill();
   }
 
   function drawPxWalls(c, room, cfg, K, ox, oy) {
@@ -4513,6 +4550,10 @@
     c.fillRect(rx, ry + t - 1, rw, 1);
     c.fillRect(rx + rw - 1, ry, 1, rh);
     c.fillRect(rx, ry + rh - 1, rw, 1);
+    // 面朝场地的内缘受光边：让可走区域边界一眼可辨
+    c.fillStyle = hexShade(cfg.wallHi, 0.30);
+    c.fillRect(rx + t, ry + t - 2, rw - t * 2, 2);
+    c.fillRect(rx + t - 2, ry + t, 2, rh - t * 2);
     // 墙脚投影
     c.fillStyle = 'rgba(0,0,0,.30)';
     c.fillRect(rx + t, ry + t, rw - t * 2, 3);
@@ -4559,7 +4600,7 @@
   }
 
   function drawPxEnemy(c, e, K, ox, oy) {
-    const R = Math.max(4, Math.round(e.r * K * 1.30));
+    const R = Math.max(4, Math.round(e.r * K * 1.36));
     const X = Math.round(e.x * K + ox), Y = Math.round(e.y * K + oy);
     const base = e.def.color || '#8b5cf6';
     const dark = hexShade(base, -0.42);
@@ -4656,6 +4697,11 @@
       c.fillRect(X + R - 3, Y - R - 2, 2, 2);
       c.fillStyle = '#ffd43b';
       c.fillRect(X + 1, Y - 2, 2, 2);
+      // 四足蹬地（朝向玩家侧前后交替）
+      const lg = Math.round(Math.sin(G.time * 9 + (e.y % 5)) * 1);
+      c.fillStyle = dark;
+      c.fillRect(X - R + 1 + lg, Y + R - 1, 3, 2);
+      c.fillRect(X + R - 4 - lg, Y + R - 1, 3, 2);
     } else if (shape === 'square' || shape === 'armor') {
       c.fillStyle = dark;
       c.fillRect(X - R, Y - R, R * 2 + 1, R * 2 + 1);
@@ -4683,6 +4729,11 @@
       c.fillStyle = '#ffffff';
       c.fillRect(X - Math.max(2, Math.round(R * 0.45)), Y - 1, 1, 1);
       c.fillRect(X + Math.max(1, Math.round(R * 0.25)), Y - 1, 1, 1);
+      // 两只小脚 + 呼吸起伏
+      const bob = Math.round(Math.sin(G.time * 6 + (e.x % 7)) * 1);
+      c.fillStyle = dark;
+      c.fillRect(X - Math.round(R * 0.62), Y + R - 2 + bob, 3, 2);
+      c.fillRect(X + Math.round(R * 0.62) - 3, Y + R - 2 - bob, 3, 2);
     }
     c.globalAlpha = 1;
     // 精英标记
@@ -4701,42 +4752,91 @@
   }
 
   // 武器拾取图标：按弹道族绘制不同剪影（中心对齐，k 为缩放）
-  function drawWeaponIcon(c, fam, col, cx, cy, k) {
+  function hexA(hex, a) {
+    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+  // 配色换装：在 HSL 空间旋转色相（n = 0/1/2）
+  function tint(hex, n) {
+    if (!n) return hex;
+    const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const l = (mx + mn) / 2;
+    let h = 0, s = 0;
+    if (mx !== mn) {
+      const dd = mx - mn;
+      s = l > 0.5 ? dd / (2 - mx - mn) : dd / (mx + mn);
+      if (mx === r) h = ((g - b) / dd + (g < b ? 6 : 0)) / 6;
+      else if (mx === g) h = ((b - r) / dd + 2) / 6;
+      else h = ((r - g) / dd + 4) / 6;
+    }
+    h = (h + n * 0.13) % 1;
+    s = Math.min(1, s * 1.05);
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s, pp = 2 * l - q;
+    const f = (t) => {
+      t = (t + 1) % 1;
+      if (t < 1 / 6) return pp + (q - pp) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return pp + (q - pp) * (2 / 3 - t) * 6;
+      return pp;
+    };
+    const hx = (v) => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0');
+    return '#' + hx(f(h + 1 / 3)) + hx(f(h)) + hx(f(h - 1 / 3));
+  }
+
+  function drawWeaponIcon(c, fam, col, cx, cy, k, id, bare) {
     k = k || 1;
     const R = (x, y, w, h, cl) => {
       c.fillStyle = cl;
       c.fillRect(Math.round(cx + x * k), Math.round(cy + y * k), Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
     };
-    R(-13, -4, 26, 8, '#0b0f14');
+    // 同族内按 id 做确定性差异：管长、握把、枪托、瞄具
+    let hv = 0;
+    const hs = String(id || 'x');
+    for (let i = 0; i < hs.length; i++) hv = (hv * 31 + hs.charCodeAt(i)) & 0xffff;
+    const bl = 16 + (hv % 8);
+    const grip = (hv >> 3) % 3;
+    const stock = ((hv >> 5) & 1) === 1;
+    const sight = ((hv >> 6) & 1) === 1;
+    if (!bare) R(-15, -5, 30, 10, '#0b0f14');
     if (fam === 'shotgun') {
-      R(-12, -2, 18, 4, col);
-      R(5, -5, 6, 10, col);
-      R(-12, 2, 7, 5, '#4a3a28');
+      R(-13, -2, bl, 4, col);
+      R(bl - 13, -6, 5, 12, col);
+      R(-13, 2, 7, 5, '#4a3a28');
+      if (stock) R(-15, 1, 5, 5, '#4a3a28');
     } else if (fam === 'launcher') {
-      R(-12, -5, 20, 10, col);
-      R(8, -4, 5, 8, '#0b0f14');
-      R(-12, 5, 8, 4, '#2b3040');
+      R(-13, -6, bl, 12, col);
+      R(bl - 13, -5, 5, 10, '#0b0f14');
+      R(-13, 6, 8, 4, '#2b3040');
+      R(-6, 3, 5, 4, '#2b3040');
     } else if (fam === 'melee') {
-      R(-12, -1, 20, 3, '#cfd4dc');
-      R(-14, -4, 4, 8, '#8a6b3d');
-      R(7, -3, 3, 6, col);
+      R(-13, -1, bl + 2, 3, '#cfd4dc');
+      R(-15, -4, 4, 8, '#8a6b3d');
+      R(bl - 11, -4, 2, 8, col);
+      if (hv % 2) R(-9, -3, 3, 2, col);
     } else if (fam === 'laser' || fam === 'rail' || fam === 'chain') {
-      R(-12, -3, 24, 6, col);
-      R(-6, -1, 18, 2, '#f8f9fa');
-      R(-12, -4, 5, 8, '#2b3040');
+      R(-13, -3, bl + 4, 6, col);
+      R(-7, -1, bl, 2, '#f8f9fa');
+      R(-14, -5, 5, 10, '#2b3040');
+      if (sight) R(0, -6, 5, 2, '#dee2e6');
     } else if (fam === 'summon' || fam === 'flame' || fam === 'charge') {
-      R(-12, -1, 20, 3, '#8a6b3d');
-      R(7, -4, 7, 7, col);
-      R(9, -2, 2, 2, '#f8f9fa');
+      R(-13, -1, bl, 3, '#8a6b3d');
+      R(bl - 13, -5, 8, 8, col);
+      R(bl - 11, -3, 3, 3, '#f8f9fa');
+      if (hv % 2) R(-8, 2, 4, 4, col);
     } else if (fam === 'bounce' || fam === 'boomerang') {
-      R(-10, -7, 18, 3, col);
-      R(-10, 4, 18, 3, col);
-      R(-13, -4, 4, 8, '#4a3a28');
+      R(-11, -7, bl - 2, 3, col);
+      R(-11, 4, bl - 2, 3, col);
+      R(-14, -4, 4, 8, '#4a3a28');
+      R(bl - 14, -4, 3, 8, col);
     } else {
-      R(-12, -2, 22, 5, col);
-      R(8, -1, 5, 2, '#fff3bf');
-      R(-12, 3, 7, 4, '#4a3a28');
-      R(-4, 2, 4, 4, '#2b3040');
+      R(-13, -2, bl + 4, 5, col);
+      R(bl - 9, -1, 5, 2, '#fff3bf');
+      if (grip === 0) R(-5, 3, 5, 5, '#2b3040');
+      else if (grip === 1) R(-9, 3, 4, 4, '#2b3040');
+      else R(-1, 3, 4, 5, '#2b3040');
+      if (stock) R(-15, 0, 4, 5, '#4a3a28');
+      if (sight) R(-2, -4, 4, 2, '#dee2e6');
     }
   }
 
@@ -4744,7 +4844,8 @@
     const p = run.player, ch = run.char;
     const X = Math.round(p.x * K + ox), Y = Math.round(p.y * K + oy);
     const R = Math.max(7, Math.round(PLAYER_R * K * 1.75));
-    const body = ch.color, hair = ch.accent;
+    const sk = run.skin || 0;
+    const body = tint(ch.color, sk), hair = tint(ch.accent, sk);
     const dark = '#0b0f14';
     c.fillStyle = 'rgba(0,0,0,.42)';
     c.fillRect(X - R + 1, Y + R - 1, R * 2 - 2, Math.max(1, Math.round(R * 0.35)));
@@ -4778,13 +4879,25 @@
     c.fillStyle = dark;
     c.fillRect(X - hr - 1, headTop - 1, hr * 2 + 2, hd + 2);
     c.fillRect(X - R - 1, bodyTop - 1, R * 2 + 2, Y + R - bodyTop + 2);
-    // 躯干
+    // 躯干（受击挤压帧 / 开火前倾帧）
+    const hurtP = run.hurtAt && G.time - run.hurtAt < 0.14;
+    const atkP = run.muzzleAt && G.time - run.muzzleAt < 0.12;
+    const bw = hurtP ? R + 1 : R;
+    const bt = hurtP ? bodyTop + 1 : bodyTop;
+    const bb = hurtP ? Y + R - 1 : Y + R;
     c.fillStyle = body;
-    c.fillRect(X - R, bodyTop, R * 2, Y + R - bodyTop);
+    c.fillRect(X - bw, bt, bw * 2, bb - bt);
     c.fillStyle = hexShade(body, -0.28);
-    c.fillRect(X - R, Y + R - 3, R * 2, 3);
+    c.fillRect(X - bw, bb - 3, bw * 2, 3);
     c.fillStyle = hexShade(body, 0.3);
-    c.fillRect(X - R + 1, bodyTop, 2, Y + R - bodyTop);
+    c.fillRect(X - bw + 1, bt, 2, bb - bt);
+    if (atkP) {
+      // 持枪手前伸
+      c.fillStyle = dark;
+      c.fillRect(X + Math.round(fx * 3) - 2, Y + Math.round(fy * 3) - 2, 4, 4);
+      c.fillStyle = '#e8c39e';
+      c.fillRect(X + Math.round(fx * 4) - 1, Y + Math.round(fy * 4) - 1, 2, 2);
+    }
     // 头部
     c.fillStyle = '#e8c39e';
     c.fillRect(X - hr, headTop, hr * 2, hd);
@@ -5054,7 +5167,7 @@
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalCompositeOperation = 'source-over';
     g.clearRect(0, 0, w, h);
-    g.fillStyle = 'rgba(0,0,0,0.55)';
+    g.fillStyle = 'rgba(0,0,0,0.26)';
     g.fillRect(0, 0, w, h);
     const p = G.run.player;
     const px = p.x * K + ox, py = p.y * K + oy;
@@ -5067,8 +5180,13 @@
     g.fillStyle = rg;
     g.beginPath(); g.arc(px, py, rad, 0, TAU); g.fill();
     g.globalCompositeOperation = 'source-over';
-    g.fillStyle = 'rgba(2,3,6,0.62)';
+    g.fillStyle = 'rgba(2,3,6,0.40)';
     const L = 520 * K;
+    // 只让阴影落在房间地面内，避免越过墙体切出生硬的黑色楔形
+    g.save();
+    g.beginPath();
+    g.rect(Math.round(WALL * K + ox), Math.round(WALL * K + oy), Math.round((ROOM_W - WALL * 2) * K), Math.round((ROOM_H - WALL * 2) * K));
+    g.clip();
     for (const o of room.obstacles) {
       const x1 = o.x * K + ox, y1 = o.y * K + oy;
       const x2 = (o.x + o.w) * K + ox, y2 = (o.y + o.h) * K + oy;
@@ -5088,9 +5206,10 @@
         g.closePath(); g.fill();
       }
     }
+    g.restore();
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(SH.cv, 0, 0, w, h, 0, 0, canvas.width, canvas.height);
     ctx.restore();
   }
@@ -5158,7 +5277,7 @@
     // 暗角
     const vg = ctx.createRadialGradient(view.w / 2, view.h / 2, Math.min(view.w, view.h) * 0.38, view.w / 2, view.h / 2, Math.max(view.w, view.h) * 0.78);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,.56)');
+    vg.addColorStop(1, 'rgba(0,0,0,.42)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, view.w, view.h);
     // 受击闪红
@@ -5972,25 +6091,49 @@
     c.fillText('全部角色默认解锁 · 点击卡片立即出发', 21, 70);
     btn('back', 1160, 24, 90, 38, '返回', { size: 15 });
 
-    const miniHero = (mx, my, col, hair) => {
-      c.fillStyle = '#0a0c11';
-      c.fillRect(mx - 9, my - 2, 18, 26);
-      c.fillStyle = col;
-      c.fillRect(mx - 7, my + 4, 14, 18);
-      c.fillStyle = hexShade(col, 0.3);
-      c.fillRect(mx - 7, my + 4, 2, 16);
-      c.fillStyle = '#0a0c11';
-      c.fillRect(mx - 6, my - 8, 12, 12);
-      c.fillStyle = '#e8c39e';
-      c.fillRect(mx - 5, my - 7, 10, 10);
-      c.fillStyle = hair;
-      c.fillRect(mx - 5, my - 7, 10, 4);
-      c.fillStyle = '#0a0c11';
-      c.fillRect(mx - 3, my - 3, 2, 2);
-      c.fillRect(mx + 1, my - 3, 2, 2);
-      c.fillStyle = '#0a0c11';
-      c.fillRect(mx - 6, my + 22, 5, 2);
-      c.fillRect(mx + 1, my + 22, 5, 2);
+    const miniHero = (mx, my, col, hair, wpn, k) => {
+      k = k || 1;
+      const R = (ox, oy, w, h, cl) => {
+        c.fillStyle = cl;
+        c.fillRect(Math.round(mx + ox * k), Math.round(my + oy * k), Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+      };
+      // 地面投影
+      c.fillStyle = 'rgba(0,0,0,.55)';
+      c.fillRect(Math.round(mx - 10 * k), Math.round(my + 21 * k), Math.round(20 * k), Math.max(1, Math.round(3 * k)));
+      // 披风
+      R(-9, -2, 18, 23, '#0a0c11');
+      R(-7.5, -1, 15, 20, hexShade(hair, -0.32));
+      // 躯干
+      R(-8, 1, 16, 21, '#0a0c11');
+      R(-7, 2, 14, 19, col);
+      R(-7, 2, 3, 18, hexShade(col, 0.28));
+      R(4, 2, 3, 18, hexShade(col, -0.26));
+      // 腰带 + 扣
+      R(-7, 16, 14, 3, '#0a0c11');
+      R(-2, 16, 4, 3, hair);
+      // 肩甲
+      R(-9, 2, 3, 6, hair);
+      R(6, 2, 3, 6, hair);
+      // 头
+      R(-6, -10, 12, 13, '#0a0c11');
+      R(-5, -9, 10, 11, '#e8c39e');
+      R(-5, -9, 10, 4, hair);
+      R(-5, -9, 2, 11, hair);
+      R(3, -9, 2, 11, hair);
+      R(-5, -6, 10, 1, hexShade(hair, -0.34));
+      // 眼睛
+      R(-3, -5, 2, 2, '#0a0c11');
+      R(1, -5, 2, 2, '#0a0c11');
+      R(-3, -5, 1, 1, '#f8f9fa');
+      R(1, -5, 1, 1, '#f8f9fa');
+      // 脚
+      R(-6, 22, 6, 2, '#0a0c11');
+      R(1, 22, 6, 2, '#0a0c11');
+      // 右手武器
+      c.save();
+      c.translate(Math.round(mx + 10 * k), Math.round(my + 9 * k));
+      drawWeaponIcon(c, wpn ? wpn.fam : 'single', wpn ? wpn.color : '#ffd43b', 0, 0, 0.7 * k, wpn ? wpn.id : 'x', true);
+      c.restore();
     };
     const statBar = (bx, by, frac, col) => {
       c.fillStyle = '#0a0c11'; c.fillRect(bx, by, 96, 7);
@@ -6009,8 +6152,16 @@
       c.fillStyle = ch.color; c.fillRect(x + 2, y + 2, cw - 4, chh - 4);
       c.fillStyle = '#0f141c'; c.fillRect(x + 5, y + 5, cw - 10, chh - 10);
       // 立绘区
+      const skCur = (save.skins && save.skins[i]) || 0;
       c.fillStyle = '#0a0d14'; c.fillRect(x + 5, y + 5, cw - 10, 76);
-      miniHero(x + cw / 2, y + 48, ch.color, ch.accent);
+      // 角色主题辉光
+      const pg = c.createRadialGradient(x + cw / 2, y + 40, 4, x + cw / 2, y + 40, 62);
+      pg.addColorStop(0, hexA(ch.color, 0.26));
+      pg.addColorStop(1, hexA(ch.color, 0));
+      c.fillStyle = pg; c.fillRect(x + 5, y + 5, cw - 10, 76);
+      c.fillStyle = 'rgba(255,255,255,.035)';
+      for (let gy = y + 9; gy < y + 79; gy += 6) c.fillRect(x + 5, gy, cw - 10, 1);
+      miniHero(x + cw / 2, y + 30, tint(ch.color, skCur), tint(ch.accent, skCur), WEAPONS[ch.weapon], 1.7);
       c.fillStyle = 'rgba(255,255,255,.06)'; c.fillRect(x + 5, y + 79, cw - 10, 1);
       // 名字条
       c.fillStyle = ch.color; c.fillRect(x + 5, y + 82, cw - 10, 26);
@@ -6047,6 +6198,21 @@
       c.fillStyle = 'rgba(255,255,255,.55)'; c.font = font(10, 800); c.textAlign = 'center';
       c.fillText('点击出发', x + cw / 2, y + chh - 14);
       c.textAlign = 'left';
+      // 配色切换（立绘区右上角三枚色块）
+      for (let n = 0; n < 3; n++) {
+        const bx = x + cw - 58 + n * 17, by = y + 12;
+        addHot('skin' + i + '_' + n, bx - 3, by - 3, 16, 16);
+        c.fillStyle = n === skCur ? '#ffd43b' : '#05070b';
+        c.fillRect(bx - 2, by - 2, 15, 15);
+        c.fillStyle = tint(ch.color, n);
+        c.fillRect(bx, by, 11, 11);
+        c.fillStyle = tint(ch.accent, n);
+        c.fillRect(bx, by + 8, 11, 3);
+      }
+      if (skCur > 0) {
+        c.fillStyle = 'rgba(255,255,255,.45)'; c.font = font(8, 700);
+        c.fillText('配色 ' + (skCur + 1), x + 8, y + 20);
+      }
     }
   }
 
@@ -6121,6 +6287,18 @@
       Sound.play('ui'); return;
     }
     if (id === 'mute') { toggleSound(); return; }
+    if (id.indexOf('skin') === 0) {
+      const rest = id.slice(4);
+      const us = rest.indexOf('_');
+      const ci = Number(rest.slice(0, us)), nn = Number(rest.slice(us + 1));
+      if (!isNaN(ci) && !isNaN(nn)) {
+        if (!save.skins) save.skins = {};
+        save.skins[ci] = nn;
+        writeSave();
+        Sound.play('ui');
+      }
+      return;
+    }
     if (id.indexOf('char') === 0) {
       const idx = Number(id.slice(4));
       if (!isNaN(idx)) { Sound.play('win'); startRun(idx); }
